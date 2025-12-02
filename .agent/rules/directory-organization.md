@@ -24,18 +24,21 @@ project_root/
 │   │   ├── __init__.py              # App factory (APP_NAME1())
 │   │   ├── routes.py                # Routes/blueprints for app1
 │   │   ├── config.py                # App-specific config
+│       ├── static/
 │   │   └── templates/               # App1-specific templates
 │   │
 │   ├── app2/                        # Second Flask application
 │   │   ├── __init__.py              # App factory (APP_NAME2())
 │   │   ├── routes.py                # Routes/blueprints for app2
 │   │   ├── config.py                # App-specific config
+│       ├── static/
 │   │   └── templates/               # App2-specific templates
 │   │
 │   └── app3/                        # Third Flask application
 │       ├── __init__.py
 │       ├── routes.py
 │       ├── config.py
+│       ├── static/
 │       └── templates/
 │
 ├── utils/                           # General utilities
