@@ -10,6 +10,7 @@ class Flags:
         self.parser.add_argument('--pcspecs', action='store_true', help='Display PC specifications')
         self.parser.add_argument('--download', action='store_true', help='Download MIMIC-IV dataset from PhysioNet')
         self.parser.add_argument('--app', type=str, choices=['data'], help='Run a Flask application (data)')
+        self.parser.add_argument('--optimize-index', action='store_true', help='Generate byte-offset index for chartevents and verify optimization')
         # Add more flags as needed
 
     def parse(self):
@@ -27,8 +28,10 @@ class Runner:
             self.run_download()
         elif self.flags.app:
             self.run_app()
+        elif self.flags.optimize_index:
+            self.run_optimize_index()
         else:
-            self.logger.error("No task specified. Use --pcspecs, --download, or --app flag")
+            self.logger.error("No task specified. Use --pcspecs, --download, --app, or --optimize-index flag")
 
     def run_pcspecs(self):
         self.logger.info("Retrieving PC specifications...")
@@ -47,6 +50,13 @@ class Runner:
             app.run(debug=True)
         else:
             self.logger.error(f"Unknown app: {self.flags.app}")
+
+    def run_optimize_index(self):
+        """Generate byte-offset index for chartevents and verify optimization."""
+        self.logger.info("Starting optimization index generation and verification...")
+        from utils.tests.verify_optimization import verify
+        verify(self.logger)
+        self.logger.info("Optimization process completed.")
 
 if __name__ == "__main__":
     flags = Flags()
