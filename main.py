@@ -10,7 +10,7 @@ class Flags:
         self.parser.add_argument('--pcspecs', action='store_true', help='Display PC specifications')
         self.parser.add_argument('--download', action='store_true', help='Download MIMIC-IV dataset from PhysioNet')
         self.parser.add_argument('--app', type=str, choices=['data'], help='Run a Flask application (data)')
-        self.parser.add_argument('--optimize-index', action='store_true', help='Generate byte-offset index for chartevents and verify optimization')
+        self.parser.add_argument('--optimize-index', nargs='?', const='all', help='Generate byte-offset index for specified file (default: all)')
         # Add more flags as needed
 
     def parse(self):
@@ -52,10 +52,37 @@ class Runner:
             self.logger.error(f"Unknown app: {self.flags.app}")
 
     def run_optimize_index(self):
-        """Generate byte-offset index for chartevents and verify optimization."""
-        self.logger.info("Starting optimization index generation and verification...")
+        """Generate byte-offset index for specified file(s) and verify optimization."""
+        target = self.flags.optimize_index
+        self.logger.info(f"Starting optimization index generation for: {target}")
+        
+        # We need to update verify_optimization.py to accept the target argument
+        # Or we can just call create_index directly here if we want to skip the "verify" wrapper
+        # But the user asked for verification.
+        # Let's import create_index directly for the work, and maybe run a quick verify after?
+        # Actually, the previous verify_optimization.py was hardcoded for chartevents.
+        # We should update verify_optimization.py to be more flexible too.
+        
+        from utils.analysis.create_lookup_index import create_index
+        create_index(target)
+        
+        # Verify
         from utils.tests.verify_optimization import verify
-        verify(self.logger)
+        from utils.analysis.filtering import IDs
+        
+        if target and target.lower() != 'all':
+            verify(self.logger, target)
+        else:
+            # Verify all or just a sample? Verifying all might be verbose.
+            # Let's verify just chartevents as a smoke test, or iterate if the user wants.
+            # Since 'all' takes a long time, the user probably wants to know it worked.
+            self.logger.info("Verifying optimization for all processed files...")
+            for file_id in IDs:
+                 # Only verify if the file exists
+                 if "location" in IDs[file_id]:
+                     # We can just try verifying, it will skip if columns missing
+                     verify(self.logger, file_id)
+        
         self.logger.info("Optimization process completed.")
 
 if __name__ == "__main__":

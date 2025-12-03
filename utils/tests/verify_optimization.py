@@ -10,42 +10,67 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from utils.analysis.filtering import Filter
 from utils.analysis.create_lookup_index import create_index
 
-def verify(logger):
+def verify(logger, file_id="chartevents"):
     """
-    Verifies the optimization by running the indexing process and testing lookup speed.
+    Verifies the optimization by checking lookup table and testing lookup speed.
     
     Args:
         logger: LoggerWrapper instance for logging
+        file_id: The file ID to verify (default: chartevents)
     """
-    logger.info("=== 1. Running Indexing Process ===")
-    logger.info("This may take several minutes for a 3.3GB file...")
+    logger.info(f"=== Verifying Optimization for {file_id} ===")
     
-    # This might take a while, but it's necessary to verify the full flow
-    create_index()
-    
-    logger.info("\n=== 2. Verifying Lookup Table ===")
     lookup_path = Path("data/icu_unique_subject_ids.csv")
+    if not lookup_path.exists():
+        logger.error("Lookup table not found.")
+        return
+        
     df = pd.read_csv(lookup_path)
     
-    if 'chartevents_byteidx_start' in df.columns and 'chartevents_byteidx_end' in df.columns:
-        logger.success("New columns found in lookup table.")
-        logger.info(f"Sample data:\n{df[['subject_id', 'chartevents_byteidx_start', 'chartevents_byteidx_end']].head()}")
+    start_col = f"{file_id}_byteidx_start"
+    end_col = f"{file_id}_byteidx_end"
+    
+    if start_col in df.columns and end_col in df.columns:
+        logger.success(f"Columns {start_col} and {end_col} found in lookup table.")
     else:
-        logger.error("New columns NOT found in lookup table.")
+        logger.error(f"Columns {start_col} and {end_col} NOT found in lookup table.")
         return
 
-    logger.info("\n=== 3. Testing Optimized Search ===")
+    logger.info(f"\n=== Testing Optimized Search for {file_id} ===")
     # Pick a subject that has data (start_byte != -1)
-    valid_subjects = df[df['chartevents_byteidx_start'] != -1]
+    if start_col not in df.columns:
+         logger.error("Cannot test search: columns missing.")
+         return
+         
+    valid_subjects = df[df[start_col] != -1]
     if valid_subjects.empty:
-        logger.error("No valid subjects with byte indices found.")
+        logger.error(f"No valid subjects with byte indices found for {file_id}.")
         return
         
     valid_subject = valid_subjects.iloc[0]['subject_id']
     logger.info(f"Testing lookup for subject: {valid_subject}")
     
-    chartevents_path = "physionet.org/files/mimiciv/3.1/icu/chartevents.csv.gz"
-    f = Filter(chartevents_path, "chartevents")
+    # We need to get the path from IDs dict
+    from utils.analysis.filtering import IDs
+    if file_id not in IDs:
+        logger.error(f"Unknown file_id {file_id}")
+        return
+        
+    file_path = IDs[file_id]["location"]
+    # Prepend base dir if needed, assuming relative to project root
+    # In filtering.py we saw it was relative.
+    # But Filter expects full path? 
+    # Let's try to construct it relative to CWD
+    full_path = Path(file_path)
+    if not full_path.exists():
+         # Try with project root
+         full_path = Path("/home/bdg20b/mimic-project") / file_path
+         
+    if not full_path.exists():
+        logger.error(f"Data file not found at {full_path}")
+        return
+
+    f = Filter(str(full_path), file_id)
     
     start = time.time()
     result = f.search_subject(valid_subject)
@@ -56,7 +81,6 @@ def verify(logger):
     
     if not result.empty and duration < 0.5:
         logger.success("Lookup was fast and returned data!")
-        logger.info(f"Retrieved {len(result)} records in {duration:.4f}s")
     elif result.empty:
         logger.error("Result is empty.")
     else:

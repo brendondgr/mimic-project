@@ -1,5 +1,10 @@
 IDs = {
-    "chartevents": {"rows": 313645063, "ordered_by": "subject_id"}
+    "chartevents": {"rows": 313645063, "ordered_by": "subject_id", "location": "physionet.org/files/mimiciv/3.1/icu/chartevents.csv.gz"},
+    "datetimeevents": {"rows": 7112999, "ordered_by": "subject_id", "location": "physionet.org/files/mimiciv/3.1/icu/datetimeevents.csv.gz"},
+    "ingredientevents": {"rows": 12229408, "ordered_by": "subject_id", "location": "physionet.org/files/mimiciv/3.1/icu/ingredientevents.csv.gz"},
+    "inputevents": {"rows": 8978893, "ordered_by": "subject_id", "location": "physionet.org/files/mimiciv/3.1/icu/inputevents.csv.gz"},
+    "outputevents": {"rows": 4234967, "ordered_by": "subject_id", "location": "physionet.org/files/mimiciv/3.1/icu/outputevents.csv.gz"},
+    "procedureevents": {"rows": 696092, "ordered_by": "subject_id", "location": "physionet.org/files/mimiciv/3.1/icu/procedureevents.csv.gz"},
 }
 
 import pandas as pd
@@ -68,24 +73,33 @@ class Filter:
             lookup_csv_path (str): Path to the CSV file to update. If None, uses self.lookup_path.
         """
         if not HAS_INDEXED_GZIP:
-            print("[Error] indexed_gzip is required for generating byte index.")
+            print(f"[{self.file_id}] Error: indexed_gzip is required for generating byte index.")
             return
 
         target_csv_path = lookup_csv_path if lookup_csv_path else self.lookup_path
-        print(f"[generate_byte_index] Starting index generation for {self.file_id}...")
+        print(f"[{self.file_id}] Starting index generation...")
         
         if not os.path.exists(target_csv_path):
-             print(f"[Error] Target CSV {target_csv_path} does not exist. Please provide a base CSV with subject_ids.")
+             print(f"[{self.file_id}] Error: Target CSV {target_csv_path} does not exist. Please provide a base CSV with subject_ids.")
              return
 
         # Load existing subjects
         subjects_df = pd.read_csv(target_csv_path)
         if 'subject_id' not in subjects_df.columns:
-             print("[Error] 'subject_id' column missing in target CSV.")
+             print(f"[{self.file_id}] Error: 'subject_id' column missing in target CSV.")
              return
         
-        # Ensure sorted for efficient matching if needed, but we'll use a dict for updates
-        # actually, the file scan gives us subjects in order.
+        # Check if columns already exist with valid data
+        start_col = f"{self.file_id}_byteidx_start"
+        end_col = f"{self.file_id}_byteidx_end"
+        
+        if start_col in subjects_df.columns and end_col in subjects_df.columns:
+            # Check if there's any valid data (non -1 values)
+            valid_count = (subjects_df[start_col] != -1).sum()
+            if valid_count > 0:
+                print(f"[{self.file_id}] Columns {start_col} and {end_col} already exist with {valid_count} valid entries. Skipping index generation.")
+                print(f"[{self.file_id}] To regenerate, delete these columns from the CSV and run again.")
+                return
         
         offsets = {}
         start_time = time.time()
@@ -94,15 +108,15 @@ class Filter:
         
         with indexed_gzip.IndexedGzipFile(self.file_path, spacing=2**22) as f:
             if os.path.exists(index_file_path):
-                print(f"Loading existing index from {index_file_path}...")
+                print(f"[{self.file_id}] Loading existing gzip index from {index_file_path}...")
                 f.import_index(filename=index_file_path)
             else:
-                print("Building gzip index (this may take a while)...")
+                print(f"[{self.file_id}] Building gzip index (this may take a while)...")
                 f.build_full_index()
-                print(f"Saving index to {index_file_path}...")
+                print(f"[{self.file_id}] Saving gzip index to {index_file_path}...")
                 f.export_index(filename=index_file_path)
             
-            print("Scanning file for offsets...")
+            print(f"[{self.file_id}] Scanning file for subject byte offsets...")
             
             # Skip header
             header_line = f.readline()
@@ -114,7 +128,7 @@ class Filter:
             try:
                 subject_col_idx = cols.index(self.sort_col) # usually 'subject_id'
             except ValueError:
-                print(f"Error: Sort column '{self.sort_col}' not found in header")
+                print(f"[{self.file_id}] Error: Sort column '{self.sort_col}' not found in header")
                 return
 
             current_subject = None
@@ -142,7 +156,7 @@ class Filter:
                     subject_start_offset = current_offset
                     
                     if len(offsets) % 1000 == 0:
-                        print(f"Found {len(offsets)} subjects...", end='\r')
+                        print(f"[{self.file_id}] Found {len(offsets)} subjects...", end='\r')
                 
                 current_offset += line_len
             
@@ -150,32 +164,40 @@ class Filter:
             if current_subject is not None:
                 offsets[current_subject] = (subject_start_offset, current_offset)
                 
-        print(f"\nScanning complete. Found {len(offsets)} subjects in {time.time() - start_time:.2f}s")
+        print(f"\n[{self.file_id}] Scanning complete. Found {len(offsets)} subjects in {time.time() - start_time:.2f}s")
         
+        # Identify new subjects
+        existing_sids = set(subjects_df['subject_id'])
+        found_sids = set(offsets.keys())
+        new_sids = found_sids - existing_sids
+        
+        if new_sids:
+            print(f"[{self.file_id}] Found {len(new_sids)} new subjects not in lookup table. Adding them...")
+            new_subjects_df = pd.DataFrame({'subject_id': list(new_sids)})
+            subjects_df = pd.concat([subjects_df, new_subjects_df], ignore_index=True)
+            subjects_df = subjects_df.sort_values('subject_id').reset_index(drop=True)
+            
         # Update DataFrame
-        start_col = f"{self.file_id}_byteidx_start"
-        end_col = f"{self.file_id}_byteidx_end"
+        # Initialize columns if they don't exist
+        if start_col not in subjects_df.columns:
+            subjects_df[start_col] = -1
+        if end_col not in subjects_df.columns:
+            subjects_df[end_col] = -1
+            
+        # Update values using map for efficiency
+        start_map = {k: v[0] for k, v in offsets.items()}
+        end_map = {k: v[1] for k, v in offsets.items()}
         
-        start_vals = []
-        end_vals = []
+        subjects_df[start_col] = subjects_df['subject_id'].map(start_map).fillna(subjects_df.get(start_col, -1)).astype(int)
+        subjects_df[end_col] = subjects_df['subject_id'].map(end_map).fillna(subjects_df.get(end_col, -1)).astype(int)
         
-        found_count = 0
-        for sid in subjects_df['subject_id']:
-            if sid in offsets:
-                start, end = offsets[sid]
-                start_vals.append(start)
-                end_vals.append(end)
-                found_count += 1
-            else:
-                start_vals.append(-1)
-                end_vals.append(-1)
-        
-        subjects_df[start_col] = start_vals
-        subjects_df[end_col] = end_vals
+        # Fill NaN with -1 if any (from map)
+        subjects_df[start_col] = subjects_df[start_col].fillna(-1).astype(int)
+        subjects_df[end_col] = subjects_df[end_col].fillna(-1).astype(int)
         
         subjects_df.to_csv(target_csv_path, index=False)
-        print(f"Updated {target_csv_path} with columns {start_col}, {end_col}")
-        print(f"Matched {found_count}/{len(subjects_df)} subjects.")
+        print(f"[{self.file_id}] Updated {target_csv_path} with columns {start_col}, {end_col}")
+        print(f"[{self.file_id}] Total subjects in lookup: {len(subjects_df)}")
         
         # Reload lookup table
         self._load_lookup_table()

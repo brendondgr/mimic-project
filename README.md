@@ -24,16 +24,21 @@ python main.py --pcspecs
 python main.py --download
 
 # Generate optimized index for fast lookups (one-time process)
+# Default (all files):
 python main.py --optimize-index
+
+# Specific file only:
+python main.py --optimize-index chartevents
 ```
 
 ## Optimization Index
 
-The `--optimize-index` command creates a byte-offset index for the `chartevents.csv.gz` file, enabling extremely fast subject lookups. This is a one-time process that:
+The `--optimize-index` command creates a byte-offset index for the large CSV.gz files (like `chartevents`, `datetimeevents`, etc.), enabling extremely fast subject lookups. This is a one-time process that:
 
-1. Scans the entire chartevents.csv.gz file (3.3GB)
+1. Scans the specified file(s)
 2. Builds a gzip index for random access
-3. Updates `data/icu_unique_subject_ids.csv` with byte offsets (`chartevents_byteidx_start`, `chartevents_byteidx_end`)
-4. Verifies the optimization by performing a test lookup
+3. Updates `data/icu_unique_subject_ids.csv` with byte offsets (e.g., `chartevents_byteidx_start`)
+4. **Adds new subject IDs** to the lookup table if they are found in the data files but missing from the index
+5. Verifies the optimization by performing a test lookup
 
-**Note**: This process may take several minutes on first run but will enable subsequent lookups to complete in <0.1 seconds.
+**Note**: This process may take several minutes per file but will enable subsequent lookups to complete in <0.1 seconds.
