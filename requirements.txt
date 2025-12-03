@@ -2,3 +2,14 @@ psutil
 loguru
 tqdm
 flask
+pandas
+scipy
+numpy
+matplotlib
+seaborn
+plotly
+scikit-learn
+ipykernel
+pyarrow
+polars
+cudf-polars-cu12
