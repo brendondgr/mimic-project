@@ -13,3 +13,4 @@ ipykernel
 pyarrow
 polars
 cudf-polars-cu12
+indexed_gzip
