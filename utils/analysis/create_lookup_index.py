@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from utils.analysis.filtering import Filter, IDs
+from utils.analysis.filtering import File_Filter, IDs
 
 # Paths
 BASE_DIR = Path("/home/bdg20b/mimic-project")
@@ -48,7 +48,8 @@ def create_index(target_file_id=None):
             continue
             
         try:
-            filter_obj = Filter(str(file_path), file_id)
+            # Fix: File_Filter expects file_id first, then file_path
+            filter_obj = File_Filter(file_id, str(file_path))
             filter_obj.generate_byte_index(str(SUBJECT_IDS_PATH))
         except Exception as e:
             print(f"Error processing {file_id}: {e}")

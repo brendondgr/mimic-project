@@ -7,7 +7,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from utils.analysis.filtering import Filter
+from utils.analysis.filtering import File_Filter
 from utils.analysis.create_lookup_index import create_index
 
 def verify(logger, file_id="chartevents"):
@@ -70,7 +70,8 @@ def verify(logger, file_id="chartevents"):
         logger.error(f"Data file not found at {full_path}")
         return
 
-    f = Filter(str(full_path), file_id)
+    # Fix: File_Filter expects file_id first, then file_path
+    f = File_Filter(file_id, str(full_path))
     
     start = time.time()
     result = f.search_subject(valid_subject)
