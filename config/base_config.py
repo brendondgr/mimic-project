@@ -6,6 +6,8 @@ from datetime import timedelta
 
 class Config:
     """Universal base configuration class for all Flask apps."""
+    # =================== Project Core Settings ===================
+    ROOT_URL = '/home/bdg20b/mimic-project/'
 
     # ==================== Flask Core Settings ====================
     DEBUG = False

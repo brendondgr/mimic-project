@@ -11,6 +11,7 @@ import pandas as pd
 import time
 import os
 from io import BytesIO
+import sys
 
 try:
     import indexed_gzip
@@ -18,14 +19,25 @@ try:
 except ImportError:
     HAS_INDEXED_GZIP = False
 
+# Import ROOT_URL from base config
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from config.base_config import Config
+ROOT_URL = Config.ROOT_URL
+
 class Filter:
-    def __init__(self, file_path, file_id, debug=False):
-        self.file_path = file_path
+    def __init__(self, file_id, file_path=None, debug=False):
         self.file_id = file_id
         self.debug = debug
         self.metadata = IDs.get(file_id)
         if not self.metadata:
             raise ValueError(f"ID {file_id} not found in IDs dictionary.")
+        
+        # Use provided file_path or fall back to metadata location
+        if file_path:
+            self.file_path = file_path
+        else:
+            # Resolve relative path using ROOT_URL
+            self.file_path = os.path.join(ROOT_URL, self.metadata["location"])
         
         self.total_rows = self.metadata["rows"]
         self.sort_col = self.metadata["ordered_by"]
@@ -314,11 +326,17 @@ class Filter:
             # Parse the bytes into a DataFrame
             result_df = pd.read_csv(BytesIO(data), names=self.header, header=None)
             
+            # Validate that the loaded data is for the correct subject
+            if not result_df.empty:
+                actual_subject = result_df.iloc[0, self.sort_col_idx]
+                if actual_subject != subject_id:
+                    print(f"[search_subject] ERROR: Loaded data for subject {actual_subject}, but expected {subject_id}. Byte offsets may be incorrect.")
+                    return pd.DataFrame(columns=self.header)
+            
             end_time = time.time()
             duration = end_time - start_time
             
             print(f"[search_subject] Successfully loaded {len(result_df)} rows for subject {subject_id}")
-            print(f"[TIMER] Total search time: {duration:.6f}s")
             
             return result_df
             
