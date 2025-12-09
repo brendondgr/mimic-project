@@ -24,40 +24,89 @@
 
         <div id="error-message" class="error-message"></div>
 
-        <div class="control-panel">
-            <form id="load-form" style="display: contents;">
-                <div class="input-group">
-                    <label for="subject_id">Subject ID</label>
-                    <select id="subject_id" name="subject_id" class="subject-select">
-                        <option value="" disabled selected>Select a Subject ID</option>
-                        {% for sid in subject_ids %}
-                        <option value="{{ sid }}">{{ sid }}</option>
-                        {% endfor %}
-                    </select>
-                    {% if total_count > subject_ids|length %}
-                    <small style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem;">
-                        Showing {{ subject_ids|length }} of {{ total_count }} IDs
-                    </small>
-                    {% endif %}
-                </div>
+        <div class="dashboard-controls">
+            <div class="control-panel">
+                <form id="load-form" style="display: contents;">
+                    <div class="input-group">
+                        <label for="subject_id">Subject ID</label>
+                        <select id="subject_id" name="subject_id" class="subject-select">
+                            <option value="" disabled selected>Select a Subject ID</option>
+                            {% for sid in subject_ids %}
+                            <option value="{{ sid }}">{{ sid }}</option>
+                            {% endfor %}
+                        </select>
+                        {% if total_count > subject_ids|length %}
+                        <small style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem;">
+                            Showing {{ subject_ids|length }} of {{ total_count }} IDs
+                        </small>
+                        {% endif %}
+                    </div>
 
-                <div class="checkbox-group">
-                    <input type="checkbox" id="random_subject" name="random_subject">
-                    <label for="random_subject">Random Subject</label>
-                </div>
+                    <div class="stack-controls"
+                        style="display:flex;flex-direction:column;gap:0.5rem;align-items:flex-start;">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="random_subject" name="random_subject">
+                            <label for="random_subject">Random Subject</label>
+                        </div>
 
-                <button type="submit" id="load-btn">
-                    <div class="spinner" id="btn-spinner"></div>
-                    <span>Load Data</span>
-                </button>
-            </form>
+                        <button type="submit" id="load-btn">
+                            <div class="spinner" id="btn-spinner"></div>
+                            <span>Load Data</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="stats-panel">
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>Value</th>
+                            <th>Metric</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Sample Size</td>
+                            <td id="stat-count">-</td>
+                            <td>Max BPM</td>
+                            <td id="stat-max">-</td>
+                        </tr>
+                        <tr>
+                            <td>Mean BPM</td>
+                            <td id="stat-mean">-</td>
+                            <td>Min BPM</td>
+                            <td id="stat-min">-</td>
+                        </tr>
+                        <tr>
+                            <td>Median BPM</td>
+                            <td id="stat-median">-</td>
+                            <td>Std Dev</td>
+                            <td id="stat-std">-</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <div class="charts-grid">
-            <div class="chart-card" id="box-plot-container">
-                <div class="empty-state">
-                    <h3>No Data Loaded</h3>
-                    <p>Enter a Subject ID or select Random to view heart rate analysis</p>
+            <div class="chart-card interpolation-dashboard" id="interpolation-dashboard">
+                <div class="dashboard-content">
+                    <h3>Interpolation Controls</h3>
+                    <div class="interpolation-controls">
+                        <label for="interpolation-method">Method:</label>
+                        <select id="interpolation-method" class="subject-select" disabled>
+                            <option value="none">None (Original Data)</option>
+                            <option value="lagrange">Lagrange</option>
+                            <option value="cubic_spline">Cubic Spline (Natural)</option>
+                            <option value="cubic_hermite">Cubic Hermite (PCHIP)</option>
+                        </select>
+                    </div>
+                    <p class="method-description">
+                        Select a method to visualize interpolated trends between data points.
+                    </p>
                 </div>
             </div>
             <div class="chart-card" id="line-graph-container">
@@ -77,6 +126,8 @@
             const loadBtn = document.getElementById('load-btn');
             const spinner = document.getElementById('btn-spinner');
             const errorMsg = document.getElementById('error-message');
+            const interpolationSelect = document.getElementById('interpolation-method');
+            let rawBpmData = null; // Store raw data for interpolation
 
             // Toggle input based on checkbox
             randomCheckbox.addEventListener('change', (e) => {
@@ -85,6 +136,41 @@
                     subjectInput.value = ""; // Reset selection
                 } else {
                     subjectInput.disabled = false;
+                }
+            });
+
+            // Interpolation Handler
+            interpolationSelect.addEventListener('change', async (e) => {
+                const method = e.target.value;
+                if (!rawBpmData) return;
+
+                // Disable select momentarily
+                interpolationSelect.disabled = true;
+
+                try {
+                    const response = await fetch("{{ url_for('bpm.apply_interpolation_route') }}", {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            subject_id: rawBpmData.subject_id, // useful for title
+                            raw_data: rawBpmData,
+                            interpolation_method: method
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Failed to apply interpolation');
+                    }
+
+                    renderPlot('line-graph-container', data.line_graph);
+
+                } catch (err) {
+                    console.error('Interpolation error:', err);
+                    alert('Error applying interpolation: ' + err.message);
+                } finally {
+                    interpolationSelect.disabled = false;
                 }
             });
 
@@ -97,6 +183,8 @@
                 loadBtn.disabled = true;
                 spinner.style.display = 'inline-block';
                 loadBtn.querySelector('span').textContent = 'Loading...';
+                interpolationSelect.disabled = true;
+                interpolationSelect.value = 'none';
 
                 const subjectId = subjectInput.value;
                 const isRandom = randomCheckbox.checked;
@@ -109,7 +197,8 @@
                         },
                         body: JSON.stringify({
                             subject_id: subjectId,
-                            random: isRandom
+                            random: isRandom,
+                            interpolation_method: 'none'
                         })
                     });
 
@@ -121,7 +210,6 @@
 
                     // Success - Render Plots
                     if (isRandom && data.subject_id) {
-                        // If the returned random ID isn't in our list (due to limit), add it
                         let option = subjectInput.querySelector(`option[value="${data.subject_id}"]`);
                         if (!option) {
                             option = document.createElement('option');
@@ -132,13 +220,17 @@
                         subjectInput.value = data.subject_id;
                     }
 
-                    // Note: if random was checked, we might want to uncheck it or keep it disabled?
-                    // Usually users want to see "Ah, ID X was picked".
-                    // Let's just update the value to show what was picked. 
-                    // Since the input is disabled, they see it but can't change it until they uncheck random.
+                    updateStats(data.statistics);
 
-                    renderPlot('box-plot-container', data.box_plot);
+                    // Store raw data for client-side valid interpolation requests
+                    rawBpmData = data.raw_data;
+                    // Add subject_id to rawBpmData for convenience
+                    if (rawBpmData) rawBpmData.subject_id = data.subject_id;
+
                     renderPlot('line-graph-container', data.line_graph);
+
+                    // Enable interpolation controls
+                    interpolationSelect.disabled = false;
 
                 } catch (err) {
                     errorMsg.textContent = err.message;
@@ -151,12 +243,21 @@
                 }
             });
 
+            function updateStats(stats) {
+                if (!stats) return;
+
+                const fields = ['count', 'mean', 'median', 'min', 'max', 'std'];
+                fields.forEach(field => {
+                    const el = document.getElementById(`stat-${field}`);
+                    if (el) {
+                        el.textContent = stats[field] !== undefined ? stats[field] : '-';
+                    }
+                });
+            }
+
             function renderPlot(containerId, plotData) {
                 const container = document.getElementById(containerId);
                 container.innerHTML = ''; // Clear empty state
-
-                // Plotly.newPlot expects: container, data, layout, config
-                // plotData contains { data: [], layout: {} } from python
 
                 const config = { responsive: true, displayModeBar: false };
                 Plotly.newPlot(containerId, plotData.data, plotData.layout, config);
