@@ -18,6 +18,7 @@ class Config:
     # ==================== Logging ====================
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
     LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'logs')
+    UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'uploads')
     
     # ==================== API Settings ====================
     JSON_API_SORT_KEYS = False

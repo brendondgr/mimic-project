@@ -9,7 +9,7 @@ class Flags:
         self.parser = argparse.ArgumentParser(description="Runner with flags")
         self.parser.add_argument('--pcspecs', action='store_true', help='Display PC specifications')
         self.parser.add_argument('--download', action='store_true', help='Download MIMIC-IV dataset from PhysioNet')
-        self.parser.add_argument('--app', type=str, choices=['data'], help='Run a Flask application (data)')
+        self.parser.add_argument('--app', type=str, choices=['data', 'bpm'], help='Run a Flask application (data, bpm)')
         self.parser.add_argument('--optimize-index', nargs='?', const='all', help='Generate byte-offset index for specified file (default: all)')
         # Add more flags as needed
 
@@ -47,6 +47,11 @@ class Runner:
             self.logger.info("Starting Data Flask application...")
             from apps.data import create_data_app
             app = create_data_app()
+            app.run(debug=True)
+        elif self.flags.app == 'bpm':
+            self.logger.info("Starting BPM Flask application...")
+            from apps.bpm import create_bpm_app
+            app = create_bpm_app()
             app.run(debug=True)
         else:
             self.logger.error(f"Unknown app: {self.flags.app}")
