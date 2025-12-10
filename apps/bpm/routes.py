@@ -294,6 +294,43 @@ def apply_interpolation_route():
     except Exception as e:
         return jsonify({'error': f'Error applying interpolation: {str(e)}'}), 500
 
+@bpm_bp.route('/api/save-graph', methods=['POST'])
+def save_graph():
+    try:
+        data = request.get_json()
+        image_data = data.get('image_data') # base64 string
+        subject_id = data.get('subject_id')
+        method = data.get('method', 'none')
+        
+        if not image_data or not subject_id:
+            return jsonify({'error': 'Missing data'}), 400
+
+        # Remove header if present (data:image/png;base64,)
+        if ',' in image_data:
+            image_data = image_data.split(',')[1]
+            
+        # Decode
+        import base64
+        import os
+        img_bytes = base64.b64decode(image_data)
+        
+        # Define path: data/apps/bpm/ from root (cwd)
+        save_dir = os.path.join(os.getcwd(), 'data', 'apps', 'bpm')
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Filename: {method}_{subject_id}.png
+        filename = f"{method}_{subject_id}.png"
+        filepath = os.path.join(save_dir, filename)
+        
+        with open(filepath, 'wb') as f:
+            f.write(img_bytes)
+            
+        return jsonify({'message': 'Graph saved successfully', 'path': filepath})
+        
+    except Exception as e:
+        print(f"Save error: {e}")
+        return jsonify({'error': f'Error saving graph: {str(e)}'}), 500
+
 def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values=None, interpolated_timestamps=None, method=None, point_types=None, outliers=None):
     """Generate Plotly JSON for Line Graph with relative time axes and generate table data."""
     

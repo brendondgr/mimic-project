@@ -109,10 +109,33 @@
                     </p>
                 </div>
             </div>
-            <div class="chart-card" id="line-graph-container">
-                <div class="empty-state">
-                    <h3>No Data Loaded</h3>
-                    <p>Visualization will appear here</p>
+            <div class="chart-card" style="position: relative;">
+                <button id="save-graph-btn" title="Save Graph" style="
+                    position: absolute; 
+                    top: 1rem; 
+                    right: 1rem; 
+                    z-index: 50; 
+                    display: none;
+                    background: rgba(31, 41, 55, 0.8); 
+                    border: 1px solid #374151; 
+                    color: #F9FAFB; 
+                    padding: 0.5rem; 
+                    border-radius: 0.5rem; 
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                        <polyline points="7 3 7 8 15 8"></polyline>
+                    </svg>
+                </button>
+                <div id="line-graph-container" style="width: 100%; height: 100%;">
+                    <div class="empty-state">
+                        <h3>No Data Loaded</h3>
+                        <p>Visualization will appear here</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -148,6 +171,7 @@
             const spinner = document.getElementById('btn-spinner');
             const errorMsg = document.getElementById('error-message');
             const interpolationSelect = document.getElementById('interpolation-method');
+            const saveBtn = document.getElementById('save-graph-btn');
             let rawBpmData = null; // Store raw data for interpolation
 
             // Toggle input based on checkbox
@@ -157,6 +181,96 @@
                     subjectInput.value = ""; // Reset selection
                 } else {
                     subjectInput.disabled = false;
+                }
+            });
+
+            // Save Graph Handler
+            saveBtn.addEventListener('click', async () => {
+                if (!rawBpmData) return;
+
+                const originalText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<div class="spinner" style="display:inline-block; width:1rem; height:1rem; border-width:2px;"></div>';
+                saveBtn.disabled = true;
+
+                // Create a temp div for the white-theme rendering
+                const tempDiv = document.createElement('div');
+                tempDiv.style.position = 'absolute';
+                tempDiv.style.left = '-9999px';
+                document.body.appendChild(tempDiv);
+
+                try {
+                    const graphDiv = document.getElementById('line-graph-container');
+
+                    // Clone data and layout to avoid mutating the actual graph
+                    const dataClone = JSON.parse(JSON.stringify(graphDiv.data));
+                    const layoutClone = JSON.parse(JSON.stringify(graphDiv.layout));
+
+                    // Apply White Theme
+                    layoutClone.paper_bgcolor = '#FFFFFF';
+                    layoutClone.plot_bgcolor = '#FFFFFF';
+                    layoutClone.font = { family: "Inter, sans-serif", color: '#111827' }; // Dark gray text
+
+                    const gridColor = '#E5E7EB'; // Light gray grid
+                    const spineColor = '#374151'; // Darker gray axis lines
+                    const tickColor = '#4B5563';  // Gray ticks
+
+                    // Update Axes Styling
+                    if (layoutClone.xaxis) {
+                        layoutClone.xaxis.gridcolor = gridColor;
+                        layoutClone.xaxis.linecolor = spineColor;
+                        layoutClone.xaxis.tickcolor = spineColor;
+                        if (layoutClone.xaxis.tickfont) layoutClone.xaxis.tickfont.color = tickColor;
+                    }
+                    if (layoutClone.yaxis) {
+                        layoutClone.yaxis.gridcolor = gridColor;
+                        layoutClone.yaxis.linecolor = spineColor;
+                        layoutClone.yaxis.tickcolor = spineColor;
+                        if (layoutClone.yaxis.tickfont) layoutClone.yaxis.tickfont.color = tickColor;
+                    }
+
+                    // Render temporary plot
+                    await Plotly.newPlot(tempDiv, dataClone, layoutClone);
+
+                    // Capture image from Temp Plot
+                    const dataUrl = await Plotly.toImage(tempDiv, { format: 'png', width: 1200, height: 800 });
+
+                    const method = interpolationSelect.value;
+                    const subjectId = rawBpmData.subject_id;
+
+                    // Send to backend
+                    const response = await fetch("{{ url_for('bpm.save_graph') }}", {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            image_data: dataUrl,
+                            subject_id: subjectId,
+                            method: method
+                        })
+                    });
+
+                    const resData = await response.json();
+                    if (!response.ok) throw new Error(resData.error || 'Failed to save');
+
+                    // Brief success feedback
+                    saveBtn.style.color = '#10B981'; // Green
+                    saveBtn.style.borderColor = '#10B981';
+                    setTimeout(() => {
+                        saveBtn.innerHTML = originalText;
+                        saveBtn.style.color = '#F9FAFB';
+                        saveBtn.style.borderColor = '#374151';
+                        saveBtn.disabled = false;
+                    }, 2000);
+
+                } catch (err) {
+                    console.error('Save error:', err);
+                    alert('Error saving graph: ' + err.message);
+                    saveBtn.innerHTML = originalText;
+                    saveBtn.disabled = false;
+                } finally {
+                    // Cleanup
+                    if (document.body.contains(tempDiv)) {
+                        document.body.removeChild(tempDiv);
+                    }
                 }
             });
 
@@ -208,6 +322,7 @@
                 interpolationSelect.disabled = true;
                 interpolationSelect.value = 'none';
                 document.getElementById('data-table-container').style.display = 'none'; // Hide table while loading
+                saveBtn.style.display = 'none'; // Hide save button
 
                 const subjectId = subjectInput.value;
                 const isRandom = randomCheckbox.checked;
@@ -255,6 +370,7 @@
 
                     // Enable interpolation controls
                     interpolationSelect.disabled = false;
+                    saveBtn.style.display = 'block'; // Show save button
 
                 } catch (err) {
                     errorMsg.textContent = err.message;
