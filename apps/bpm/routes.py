@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.utils
-from scipy.interpolate import lagrange, CubicSpline, PchipInterpolator
+from scipy.interpolate import BarycentricInterpolator, CubicSpline, PchipInterpolator
 from flask import Blueprint, render_template, request, jsonify, current_app
 
 # Import File_Filter
@@ -50,42 +50,57 @@ def apply_interpolation(values, timestamps, method):
         df = df.sort_values('time')
         
         times = df['time']
-        y = df['val'].to_numpy()
-        
         start_time = times.min()
+        
         # Calculate seconds from start
         x = (times - start_time).dt.total_seconds().to_numpy()
+        y = df['val'].to_numpy()
 
         # Determine query points (denser grid for visualization)
         if len(x) < 2:
             return values, timestamps
 
+        # Visualization Grid:
+        # We want a smooth line, so we need a dense grid.
+        # BUT we also want to ensure the line passes exactly through the original points (knots).
+        # So we union the dense grid with the original x values.
+        
         num_points = max(200, len(x) * 5)
-        # If method is lagrange and N > 20, we must limit scope or points
-        if method == 'lagrange' and len(x) > 20:
-             # Limit to last 20 points
-             sub_mask = np.arange(len(x)) >= (len(x) - 20)
-             x_active = x[sub_mask]
-             y_active = y[sub_mask]
-             x_new = np.linspace(x_active.min(), x_active.max(), num_points)
-             poly = lagrange(x_active, y_active)
-             y_new = poly(x_new)
-        else:
-             x_active = x
-             y_active = y
-             x_new = np.linspace(x.min(), x.max(), num_points)
+        grid = np.linspace(x.min(), x.max(), num_points)
+        x_new = np.unique(np.concatenate((x, grid)))
+        x_new.sort()
+        
+        y_new = None
+        
+        # Method selection
+        if method == 'lagrange':
+             # Use BarycentricInterpolator for better numerical stability than lagrange()
+             # To avoid extreme Runge's phenomenon with many data points,
+             # we limit to 20 evenly-spaced points across the entire dataset.
+             # This keeps polynomial degree manageable while covering the full time range.
              
-             if method == 'lagrange':
-                 poly = lagrange(x_active, y_active)
+             if len(x) > 20:
+                 # Select 20 evenly-spaced indices across the entire dataset
+                 indices = np.linspace(0, len(x) - 1, 20, dtype=int)
+                 x_active = x[indices]
+                 y_active = y[indices]
+                 
+                 # Interpolate over the entire range
+                 poly = BarycentricInterpolator(x_active, y_active)
                  y_new = poly(x_new)
-             elif method == 'cubic_spline':
-                 cs = CubicSpline(x_active, y_active, bc_type='natural')
-                 y_new = cs(x_new)
-             elif method == 'cubic_hermite':
-                 pch = PchipInterpolator(x_active, y_active)
-                 y_new = pch(x_new)
              else:
-                 return None, None
+                 # Use all points if we have 20 or fewer
+                 poly = BarycentricInterpolator(x, y)
+                 y_new = poly(x_new)
+                 
+        elif method == 'cubic_spline':
+             cs = CubicSpline(x, y, bc_type='natural')
+             y_new = cs(x_new)
+        elif method == 'cubic_hermite':
+             pch = PchipInterpolator(x, y)
+             y_new = pch(x_new)
+        else:
+             return None, None
 
         # Convert back to timestamps
         t_new = start_time + pd.to_timedelta(x_new, unit='s')
@@ -149,24 +164,59 @@ def load_data():
             return jsonify({'error': f'No Heart Rate (BPM) data found for subject {subject_id}.'}), 404
             
         # Prepare Data
-        # Sort by charttime
         if 'charttime' in bpm_df.columns:
             bpm_df['charttime'] = pd.to_datetime(bpm_df['charttime'])
             bpm_df = bpm_df.sort_values('charttime')
         
-        valuenum = bpm_df['valuenum'].tolist()
-        charttime = bpm_df['charttime'].dt.strftime('%Y-%m-%d %H:%M:%S').tolist() if 'charttime' in bpm_df.columns else []
+        # Outlier Detection (IQR Method)
+        outliers_list = []
+        if not bpm_df.empty and len(bpm_df) > 1:
+            Q1 = bpm_df['valuenum'].quantile(0.25)
+            Q3 = bpm_df['valuenum'].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            
+            outlier_mask = (bpm_df['valuenum'] < lower_bound) | (bpm_df['valuenum'] > upper_bound)
+            outliers_df = bpm_df[outlier_mask].copy()
+            clean_df = bpm_df[~outlier_mask].copy()
+            
+            # Prepare outliers for table
+            if not outliers_df.empty:
+                o_vals = outliers_df['valuenum'].tolist()
+                o_times = outliers_df['charttime'].dt.strftime('%Y-%m-%d %H:%M:%S').tolist()
+                for v, t in zip(o_vals, o_times):
+                    outliers_list.append({'val': v, 'time': t})
+        else:
+            clean_df = bpm_df.copy()
 
-        # Calculate Statistics
+        # Averaging Duplicates on Clean Data
+        valuenum = []
+        charttime = []
+        point_types = []
+        
+        if not clean_df.empty:
+            # Group by charttime to average duplicates
+            grouped = clean_df.groupby('charttime')['valuenum'].agg(['mean', 'count']).reset_index()
+            grouped = grouped.sort_values('charttime')
+            
+            valuenum = grouped['mean'].tolist()
+            # If count > 1, it was averaged
+            point_types = ['Averaged' if c > 1 else 'Original' for c in grouped['count']]
+            charttime = grouped['charttime'].dt.strftime('%Y-%m-%d %H:%M:%S').tolist()
+
+        # Calculate Statistics on the processed (clean + averaged) data? 
+        # Usually stats should represent the valid dataset used for analysis
         stats = {}
-        if not bpm_df.empty:
+        if valuenum:
+            v_series = pd.Series(valuenum)
             stats = {
-                'count': int(len(bpm_df)),
-                'mean': round(bpm_df['valuenum'].mean(), 1),
-                'median': round(bpm_df['valuenum'].median(), 1),
-                'min': round(bpm_df['valuenum'].min(), 1),
-                'max': round(bpm_df['valuenum'].max(), 1),
-                'std': round(bpm_df['valuenum'].std(), 1) if len(bpm_df) > 1 else 0.0
+                'count': int(len(v_series)),
+                'mean': round(v_series.mean(), 1),
+                'median': round(v_series.median(), 1),
+                'min': round(v_series.min(), 1),
+                'max': round(v_series.max(), 1),
+                'std': round(v_series.std(), 1) if len(v_series) > 1 else 0.0
             }
 
         # Handle Interpolation
@@ -176,15 +226,30 @@ def load_data():
         if interpolation_method and interpolation_method != 'none':
             interpolated_values, interpolated_timestamps = apply_interpolation(valuenum, charttime, interpolation_method)
 
-        # Create Visualizations
-        graphs = create_line_plot(valuenum, charttime, subject_id, interpolated_values, interpolated_timestamps, interpolation_method)
+        # Create Visualizations and Table Data
+        vis_data = create_line_plot(
+            valuenum, 
+            charttime, 
+            subject_id, 
+            interpolated_values, 
+            interpolated_timestamps, 
+            interpolation_method,
+            point_types=point_types,
+            outliers=outliers_list
+        )
         
         return jsonify({
             'subject_id': subject_id,
-            'raw_data': {'values': valuenum, 'timestamps': charttime},
+            'raw_data': {
+                'values': valuenum, 
+                'timestamps': charttime,
+                'types': point_types,
+                'outliers': outliers_list
+            },
             'interpolated_data': {'values': interpolated_values, 'timestamps': interpolated_timestamps} if interpolated_values else None,
             'interpolation_method': interpolation_method,
-            'line_graph': graphs['line_graph'],
+            'line_graph': vis_data['line_graph'],
+            'table_data': vis_data['table_data'],
             'statistics': stats
         })
     
@@ -201,32 +266,72 @@ def apply_interpolation_route():
         
         raw_values = raw_data.get('values', [])
         raw_timestamps = raw_data.get('timestamps', [])
+        point_types = raw_data.get('types', [])
+        outliers = raw_data.get('outliers', [])
         
         if not raw_values or not raw_timestamps:
              return jsonify({'error': 'Raw data missing'}), 400
              
         interpolated_values, interpolated_timestamps = apply_interpolation(raw_values, raw_timestamps, interpolation_method)
         
-        graphs = create_line_plot(
+        vis_data = create_line_plot(
             raw_values, 
             raw_timestamps, 
             subject_id, 
             interpolated_values, 
             interpolated_timestamps, 
-            interpolation_method
+            interpolation_method,
+            point_types=point_types,
+            outliers=outliers
         )
         
         return jsonify({
-            'line_graph': graphs['line_graph'],
+            'line_graph': vis_data['line_graph'],
+            'table_data': vis_data['table_data'],
             'interpolated_data': {'values': interpolated_values, 'timestamps': interpolated_timestamps} if interpolated_values else None
         })
         
     except Exception as e:
         return jsonify({'error': f'Error applying interpolation: {str(e)}'}), 500
 
-def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values=None, interpolated_timestamps=None, method=None):
-    """Generate Plotly JSON for Line Graph with optional Interpolation adhering to dark theme."""
+def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values=None, interpolated_timestamps=None, method=None, point_types=None, outliers=None):
+    """Generate Plotly JSON for Line Graph with relative time axes and generate table data."""
     
+    # Helper to calculate relative times
+    def get_relative_data(timestamps, start_time):
+        if not timestamps:
+            return [], []
+        
+        # Convert to datetime if not already
+        ts = pd.to_datetime(timestamps)
+        
+        # Calculate elapsed hours
+        # ts - start_time returns a TimedeltaIndex, which supports total_seconds() directly
+        elapsed_seconds = (ts - start_time).total_seconds()
+        elapsed_hours = elapsed_seconds / 3600.0
+        
+        # Create formatted strings: "Day X, Y.Yh"
+        # Day 1 starts at 0h. 
+        days = (elapsed_hours // 24).astype(int) + 1
+        formatted = [f"Day {d}, {h:.1f}h" for d, h in zip(days, elapsed_hours)]
+        
+        return elapsed_hours.tolist(), formatted
+
+    # Establish global start time from raw data
+    raw_ts_dt = pd.to_datetime(raw_timestamps)
+    if raw_ts_dt.empty:
+        return {'line_graph': {}, 'table_data': []}
+        
+    start_time = raw_ts_dt.min()
+    
+    # Process Raw Data
+    raw_hours, raw_labels = get_relative_data(raw_timestamps, start_time)
+    
+    # Process Interpolated Data
+    interp_hours, interp_labels = [], []
+    if interpolated_values and interpolated_timestamps:
+        interp_hours, interp_labels = get_relative_data(interpolated_timestamps, start_time)
+
     # Theme Colors
     BG_COLOR = '#111827'
     TEXT_PRIMARY = '#F9FAFB'
@@ -234,7 +339,7 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
     GRID_COLOR = '#374151'
     SPINE_COLOR = '#D1D5DB'
     PRIMARY_COLOR = '#2563EB' 
-    ACCENT_COLOR = '#10B981' # Green for interpolation
+    ACCENT_COLOR = '#10B981' 
     
     common_layout = dict(
         autosize=True,
@@ -249,7 +354,8 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
             linewidth=0.8,
             tickcolor=SPINE_COLOR,
             tickfont=dict(size=10, color=TEXT_SECONDARY),
-            title_font=dict(size=12, family="sans-serif", weight="bold")
+            title_font=dict(size=12, family="sans-serif", weight="bold"),
+            zeroline=False
         ),
         yaxis=dict(
             gridcolor=GRID_COLOR,
@@ -265,30 +371,31 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
     # Line Graph
     line_fig = go.Figure()
 
-    # Trace 1: Original Data (Scatter/Markers)
-    # If interpolation is present, we clearly show original as markers
-    # If no interpolation, can be lines+markers or just lines. User requested "Original data points as scatter plot"
-    
+    # Trace 1: Original Data
     mode = 'markers' if interpolated_values else 'lines+markers'
     
     line_fig.add_trace(go.Scatter(
-        x=raw_timestamps,
+        x=raw_hours,
         y=raw_values,
         mode=mode,
         name='Original Data',
+        customdata=raw_labels,
+        hovertemplate='%{customdata}<br>BPM: %{y:.1f}<extra></extra>',
         marker=dict(color=PRIMARY_COLOR, size=8),
         line=dict(color=PRIMARY_COLOR, width=2)
     ))
 
-    # Trace 2: Interpolated Data (Line)
+    # Trace 2: Interpolated Data
     if interpolated_values and interpolated_timestamps:
         label = f"Interpolated ({method})"
         line_fig.add_trace(go.Scatter(
-            x=interpolated_timestamps,
+            x=interp_hours,
             y=interpolated_values,
             mode='lines',
             name=label,
-            line=dict(color=ACCENT_COLOR, width=3, shape='spline' if 'cubic' in str(method) else 'linear')
+            customdata=interp_labels,
+            hovertemplate='%{customdata}<br>BPM: %{y:.1f}<extra></extra>',
+            line=dict(color=ACCENT_COLOR, width=3)
         ))
     
     line_layout = common_layout.copy()
@@ -298,7 +405,7 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
         font=dict(size=18, family="sans-serif", weight="bold")
     )
     line_layout['xaxis'] = common_layout['xaxis'].copy()
-    line_layout['xaxis']['title'] = "Time"
+    line_layout['xaxis']['title'] = "Time (Hours from Start)"
     line_layout['yaxis'] = common_layout['yaxis'].copy()
     line_layout['yaxis']['title'] = "BPM"
     line_layout['legend'] = dict(
@@ -311,6 +418,46 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
     
     line_fig.update_layout(**line_layout)
     
+    
+    # Prepare Table Data
+    table_rows = []
+    
+    # helper for constructing row
+    def add_row(t_str, h, val, type_str):
+        table_rows.append({
+            'time': t_str,
+            'hours': h,
+            'bpm': val,
+            'type': type_str
+        })
+    
+    # Original / Averaged Data
+    # point_types might be None if coming from old context, default to Original
+    if point_types is None:
+        point_types = ['Original'] * len(raw_values)
+        
+    for t_str, h, val, p_type in zip(raw_labels, raw_hours, raw_values, point_types):
+        add_row(t_str, h, val, p_type)
+
+    # Outliers
+    # We need to calculate relative time for outliers too
+    if outliers:
+        o_vals = [o['val'] for o in outliers]
+        o_times = [o['time'] for o in outliers]
+        o_hours, o_labels = get_relative_data(o_times, start_time)
+        
+        for t_str, h, val in zip(o_labels, o_hours, o_vals):
+            add_row(t_str, h, val, "Outlier")
+
+    # Interpolated Data - ONLY if requested
+    if interpolated_values:
+         for t_str, h, val in zip(interp_labels, interp_hours, interpolated_values):
+            add_row(t_str, h, val, f'Interpolated ({method})')
+            
+    # Sort by time
+    table_rows.sort(key=lambda x: x['hours'])
+    
     return {
-        'line_graph': json.loads(json.dumps(line_fig, cls=plotly.utils.PlotlyJSONEncoder))
+        'line_graph': json.loads(json.dumps(line_fig, cls=plotly.utils.PlotlyJSONEncoder)),
+        'table_data': table_rows
     }

@@ -116,6 +116,27 @@
                 </div>
             </div>
         </div>
+
+        <div class="data-table-container" id="data-table-container">
+            <div class="data-table-header">
+                <h3>Data Values</h3>
+            </div>
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Hours (h)</th>
+                            <th>BPM</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody id="data-table-body">
+                        <!-- Rows rendered by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -165,6 +186,7 @@
                     }
 
                     renderPlot('line-graph-container', data.line_graph);
+                    renderTable(data.table_data);
 
                 } catch (err) {
                     console.error('Interpolation error:', err);
@@ -185,6 +207,7 @@
                 loadBtn.querySelector('span').textContent = 'Loading...';
                 interpolationSelect.disabled = true;
                 interpolationSelect.value = 'none';
+                document.getElementById('data-table-container').style.display = 'none'; // Hide table while loading
 
                 const subjectId = subjectInput.value;
                 const isRandom = randomCheckbox.checked;
@@ -228,6 +251,7 @@
                     if (rawBpmData) rawBpmData.subject_id = data.subject_id;
 
                     renderPlot('line-graph-container', data.line_graph);
+                    renderTable(data.table_data);
 
                     // Enable interpolation controls
                     interpolationSelect.disabled = false;
@@ -261,6 +285,44 @@
 
                 const config = { responsive: true, displayModeBar: false };
                 Plotly.newPlot(containerId, plotData.data, plotData.layout, config);
+            }
+
+            function renderTable(tableData) {
+                const container = document.getElementById('data-table-container');
+                const tbody = document.getElementById('data-table-body');
+
+                if (!tableData || tableData.length === 0) {
+                    container.style.display = 'none';
+                    return;
+                }
+
+                container.style.display = 'block';
+                tbody.innerHTML = '';
+
+                // Limit to reasonable amount if massive? Maybe not needed for now, as browsers handle thousands of rows okay-ish.
+                // But for interpolated 5000+ points it might lag.
+                // Let's cap rendering at 2000 points or implement pagination if needed. 
+                // For now, raw render.
+
+                // Use DocumentFragment for performance
+                const fragment = document.createDocumentFragment();
+
+                tableData.forEach(row => {
+                    const tr = document.createElement('tr');
+
+                    const isOriginal = row.type.toLowerCase().includes('original');
+                    const typeClass = isOriginal ? 'type-original' : 'type-interpolated';
+
+                    tr.innerHTML = `
+                        <td>${row.time}</td>
+                        <td>${row.hours.toFixed(2)}</td>
+                        <td>${row.bpm.toFixed(1)}</td>
+                        <td><span class="type-badge ${typeClass}">${row.type}</span></td>
+                    `;
+                    fragment.appendChild(tr);
+                });
+
+                tbody.appendChild(fragment);
             }
         });
     </script>

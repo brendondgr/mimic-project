@@ -345,3 +345,116 @@ select.subject-select option {
     font-size: 0.9rem;
     line-height: 1.5;
 }
+
+/* Data Table Styles */
+.data-table-container {
+    margin-top: 2rem;
+    width: 100%;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    display: none;
+    /* Hidden by default */
+}
+
+.data-table-header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    background-color: rgba(31, 41, 55, 0.5);
+}
+
+.data-table-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
+.table-wrapper {
+    max-height: 400px;
+    overflow-y: auto;
+    width: 100%;
+}
+
+/* Scrollbar styling for table */
+.table-wrapper::-webkit-scrollbar {
+    width: 8px;
+}
+
+.table-wrapper::-webkit-scrollbar-track {
+    background: var(--bg-color);
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 4px;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    text-align: left;
+}
+
+.data-table th,
+.data-table td {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.data-table th {
+    background-color: var(--card-bg);
+    /* Match bg so sticky works well */
+    color: var(--text-secondary);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.data-table td {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.data-table tr:hover td {
+    background-color: rgba(55, 65, 81, 0.3);
+}
+
+.data-table .type-badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.type-original {
+    background-color: rgba(37, 99, 235, 0.2);
+    color: #60A5FA;
+    border: 1px solid rgba(37, 99, 235, 0.3);
+}
+
+.type-interpolated {
+    background-color: rgba(16, 185, 129, 0.2);
+    color: #34D399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.type-averaged {
+    background-color: rgba(16, 185, 129, 0.2);
+    /* Same green as interpolated/accent */
+    color: #34D399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.type-outlier {
+    background-color: rgba(239, 68, 68, 0.2);
+    /* Red */
+    color: #F87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
