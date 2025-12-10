@@ -27,10 +27,14 @@ def index():
     display_ids = available_ids[:5000] if available_ids else []
     return render_template('index.html', subject_ids=display_ids, total_count=len(available_ids))
 
-def apply_interpolation(values, timestamps, method):
+def apply_interpolation(values, timestamps, method, bin_size=0):
     """
-    Apply interpolation to the data.
-    Returns interpolated values and timestamps (dense format for smooth plotting).
+    Apply interpolation to the data using specified binning.
+    Returns:
+        interpolated_values: List of interpolated Y values
+        interpolated_timestamps: List of interpolated timestamps (strings)
+        binned_values: List of Y values used for interpolation (binned averages)
+        binned_timestamps: List of timestamps for binned points (strings)
     """
     if not values or not timestamps:
         return None, None
@@ -58,53 +62,100 @@ def apply_interpolation(values, timestamps, method):
 
         # Determine query points (denser grid for visualization)
         if len(x) < 2:
-            return values, timestamps
+            return values, timestamps, None, None
+
+        # Apply Binning Logic if requested
+        x_active, y_active = x, y
+        
+        if bin_size > 0:
+            if method == 'lagrange':
+                # Lagrangian specific binning logic
+                if (len(x) / bin_size) > 20:
+                    # Use 20 evenly-spaced midpoints
+                    indices = np.linspace(0, len(x) - 1, 20, dtype=int)
+                    x_binned = []
+                    y_binned = []
+                    
+                    half_bin = bin_size // 2
+                    for idx in indices:
+                        start_idx = max(0, idx - half_bin)
+                        end_idx = min(len(x), idx + half_bin + 1) # +1 for slicing
+                        
+                        # Average the window
+                        if start_idx < end_idx:
+                            x_binned.append(np.mean(x[start_idx:end_idx]))
+                            y_binned.append(np.mean(y[start_idx:end_idx]))
+                            
+                    x_active = np.array(x_binned)
+                    y_active = np.array(y_binned)
+                else:
+                    # Standard binning behavior if not enough points for special logic
+                    # Calculate number of bins
+                    num_bins = int(np.ceil(len(x) / bin_size))
+                    x_active = []
+                    y_binned = []
+                    for i in range(num_bins):
+                        start_idx = i * bin_size
+                        end_idx = min((i + 1) * bin_size, len(x))
+                        x_active.append(np.mean(x[start_idx:end_idx]))
+                        y_binned.append(np.mean(y[start_idx:end_idx]))
+                    x_active = np.array(x_active)
+                    y_active = np.array(y_binned)
+            else:
+                 # Standard Binning for other methods
+                 num_bins = int(np.ceil(len(x) / bin_size))
+                 x_active = []
+                 y_active = []
+                 for i in range(num_bins):
+                     start_idx = i * bin_size
+                     end_idx = min((i + 1) * bin_size, len(x))
+                     x_active.append(np.mean(x[start_idx:end_idx]))
+                     y_active.append(np.mean(y[start_idx:end_idx]))
+                 x_active = np.array(x_active)
+                 y_active = np.array(y_active)
 
         # Visualization Grid:
         # We want a smooth line, so we need a dense grid.
-        # BUT we also want to ensure the line passes exactly through the original points (knots).
-        # So we union the dense grid with the original x values.
+        # Ensure grid spans the range of active points
         
         num_points = max(200, len(x) * 5)
+        # Use active points range for grid
         grid = np.linspace(x.min(), x.max(), num_points)
-        x_new = np.unique(np.concatenate((x, grid)))
+        x_new = np.unique(np.concatenate((grid, x_active)))
         x_new.sort()
         
         y_new = None
         
         # Method selection
         if method == 'lagrange':
-             # Use BarycentricInterpolator for better numerical stability than lagrange()
-             # To avoid extreme Runge's phenomenon with many data points,
-             # we limit to 20 evenly-spaced points across the entire dataset.
-             # This keeps polynomial degree manageable while covering the full time range.
-             
-             if len(x) > 20:
-                 # Select 20 evenly-spaced indices across the entire dataset
-                 indices = np.linspace(0, len(x) - 1, 20, dtype=int)
-                 x_active = x[indices]
-                 y_active = y[indices]
-                 
-                 # Interpolate over the entire range
-                 poly = BarycentricInterpolator(x_active, y_active)
+             # Use BarycentricInterpolator
+             if len(x_active) > 20 and bin_size == 0:
+                 # Default behavior if NO binning selected but still too many points: 
+                 # Limit to 20 evenly-spaced points to prevent instability (legacy behavior)
+                 indices = np.linspace(0, len(x_active) - 1, 20, dtype=int)
+                 start_x = x_active[indices]
+                 start_y = y_active[indices]
+                 poly = BarycentricInterpolator(start_x, start_y)
                  y_new = poly(x_new)
              else:
-                 # Use all points if we have 20 or fewer
-                 poly = BarycentricInterpolator(x, y)
+                 # Use active points (which are binned if bin_size > 0)
+                 poly = BarycentricInterpolator(x_active, y_active)
                  y_new = poly(x_new)
                  
         elif method == 'cubic_spline':
-             cs = CubicSpline(x, y, bc_type='natural')
+             cs = CubicSpline(x_active, y_active, bc_type='natural')
              y_new = cs(x_new)
         elif method == 'cubic_hermite':
-             pch = PchipInterpolator(x, y)
+             pch = PchipInterpolator(x_active, y_active)
              y_new = pch(x_new)
         else:
-             return None, None
+             return None, None, None, None
 
         # Convert back to timestamps
         t_new = start_time + pd.to_timedelta(x_new, unit='s')
-        return y_new.tolist(), t_new.strftime('%Y-%m-%d %H:%M:%S').tolist()
+        t_binned = start_time + pd.to_timedelta(x_active, unit='s')
+        
+        return y_new.tolist(), t_new.strftime('%Y-%m-%d %H:%M:%S').tolist(), y_active.tolist(), t_binned.strftime('%Y-%m-%d %H:%M:%S').tolist()
 
     except Exception as e:
         print(f"Interpolation error: {e}")
@@ -117,7 +168,9 @@ def load_data():
         data = request.get_json()
         subject_id = data.get('subject_id')
         is_random = data.get('random', False)
+        is_random = data.get('random', False)
         interpolation_method = data.get('interpolation_method', 'none')
+        bin_size = int(data.get('bin_size', 0))
         
         # Valid subject ID logic
         available_ids = current_app.config.get('SUBJECT_IDS', [])
@@ -222,9 +275,11 @@ def load_data():
         # Handle Interpolation
         interpolated_values = None
         interpolated_timestamps = None
+        binned_values = None
+        binned_timestamps = None
         
         if interpolation_method and interpolation_method != 'none':
-            interpolated_values, interpolated_timestamps = apply_interpolation(valuenum, charttime, interpolation_method)
+            interpolated_values, interpolated_timestamps, binned_values, binned_timestamps = apply_interpolation(valuenum, charttime, interpolation_method, bin_size=bin_size)
 
         # Create Visualizations and Table Data
         vis_data = create_line_plot(
@@ -234,7 +289,6 @@ def load_data():
             interpolated_values, 
             interpolated_timestamps, 
             interpolation_method,
-            point_types=point_types,
             outliers=outliers_list
         )
         
@@ -247,7 +301,9 @@ def load_data():
                 'outliers': outliers_list
             },
             'interpolated_data': {'values': interpolated_values, 'timestamps': interpolated_timestamps} if interpolated_values else None,
+            'binned_data': {'values': binned_values, 'timestamps': binned_timestamps} if binned_values else None,
             'interpolation_method': interpolation_method,
+            'bin_size': bin_size,
             'line_graph': vis_data['line_graph'],
             'table_data': vis_data['table_data'],
             'statistics': stats
@@ -262,6 +318,8 @@ def apply_interpolation_route():
         data = request.get_json()
         subject_id = data.get('subject_id')
         interpolation_method = data.get('interpolation_method')
+        bin_size = int(data.get('bin_size', 0))
+        hide_original = data.get('hide_original_points', False)
         raw_data = data.get('raw_data', {})
         
         raw_values = raw_data.get('values', [])
@@ -272,7 +330,7 @@ def apply_interpolation_route():
         if not raw_values or not raw_timestamps:
              return jsonify({'error': 'Raw data missing'}), 400
              
-        interpolated_values, interpolated_timestamps = apply_interpolation(raw_values, raw_timestamps, interpolation_method)
+        interpolated_values, interpolated_timestamps, binned_values, binned_timestamps = apply_interpolation(raw_values, raw_timestamps, interpolation_method, bin_size=bin_size)
         
         vis_data = create_line_plot(
             raw_values, 
@@ -282,7 +340,11 @@ def apply_interpolation_route():
             interpolated_timestamps, 
             interpolation_method,
             point_types=point_types,
-            outliers=outliers
+            outliers=outliers,
+            bin_size=bin_size,
+            hide_original_points=hide_original,
+            binned_values=binned_values,
+            binned_timestamps=binned_timestamps
         )
         
         return jsonify({
@@ -331,7 +393,7 @@ def save_graph():
         print(f"Save error: {e}")
         return jsonify({'error': f'Error saving graph: {str(e)}'}), 500
 
-def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values=None, interpolated_timestamps=None, method=None, point_types=None, outliers=None):
+def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values=None, interpolated_timestamps=None, method=None, point_types=None, outliers=None, bin_size=0, hide_original_points=False, binned_values=None, binned_timestamps=None):
     """Generate Plotly JSON for Line Graph with relative time axes and generate table data."""
     
     # Helper to calculate relative times
@@ -409,18 +471,32 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
     line_fig = go.Figure()
 
     # Trace 1: Original Data
-    mode = 'markers' if interpolated_values else 'lines+markers'
-    
-    line_fig.add_trace(go.Scatter(
-        x=raw_hours,
-        y=raw_values,
-        mode=mode,
-        name='Original Data',
-        customdata=raw_labels,
-        hovertemplate='%{customdata}<br>BPM: %{y:.1f}<extra></extra>',
-        marker=dict(color=PRIMARY_COLOR, size=8),
-        line=dict(color=PRIMARY_COLOR, width=2)
-    ))
+    if not hide_original_points:
+        mode = 'markers' if interpolated_values else 'lines+markers'
+        
+        line_fig.add_trace(go.Scatter(
+            x=raw_hours,
+            y=raw_values,
+            mode=mode,
+            name='Original Data',
+            customdata=raw_labels,
+            hovertemplate='%{customdata}<br>BPM: %{y:.1f}<extra></extra>',
+            marker=dict(color=PRIMARY_COLOR, size=8),
+            line=dict(color=PRIMARY_COLOR, width=2)
+        ))
+
+    # Trace: Binned Data (if active)
+    if binned_values and bin_size > 0:
+        binned_hours, binned_labels = get_relative_data(binned_timestamps, start_time)
+        line_fig.add_trace(go.Scatter(
+            x=binned_hours,
+            y=binned_values,
+            mode='markers',
+            name=f'Bin Average (n={bin_size})',
+            customdata=binned_labels,
+            hovertemplate='%{customdata}<br>Avg BPM: %{y:.1f}<extra></extra>',
+            marker=dict(color='#8B5CF6', size=10, symbol='diamond'), # Violet
+        ))
 
     # Trace 2: Interpolated Data
     if interpolated_values and interpolated_timestamps:
@@ -436,8 +512,12 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
         ))
     
     line_layout = common_layout.copy()
+    title_text = f"Heart Rate Over Time (Subject {subject_id})"
+    if bin_size > 0:
+        title_text += f" - Bin Size: {bin_size}"
+        
     line_layout['title'] = dict(
-        text=f"Heart Rate Over Time (Subject {subject_id})",
+        text=title_text,
         x=0.5,
         font=dict(size=18, family="sans-serif", weight="bold")
     )
@@ -450,7 +530,9 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
         yanchor="bottom",
         y=1.02,
         xanchor="right",
-        x=1
+        x=1,
+        bgcolor="rgba(0,0,0,0)",
+        font=dict(size=10)
     )
     
     line_fig.update_layout(**line_layout)
@@ -460,21 +542,31 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
     table_rows = []
     
     # helper for constructing row
-    def add_row(t_str, h, val, type_str):
+    def add_row(t_str, h, val, type_str, bin_avg=None):
         table_rows.append({
             'time': t_str,
             'hours': h,
             'bpm': val,
-            'type': type_str
+            'type': type_str,
+            'bin_avg': bin_avg
         })
     
     # Original / Averaged Data
     # point_types might be None if coming from old context, default to Original
     if point_types is None:
         point_types = ['Original'] * len(raw_values)
-        
+
+    # Note: If hide_original_points is True, they are hidden from GRAPH, but probably should remain in TABLE or at least valid data.
+    # The Plan doesn't specify hiding them from the table, but the table now has "Bin Average" column.
+    
     for t_str, h, val, p_type in zip(raw_labels, raw_hours, raw_values, point_types):
         add_row(t_str, h, val, p_type)
+
+    # Add Bin Average entries
+    if binned_values and bin_size > 0:
+        binned_hours, binned_labels = get_relative_data(binned_timestamps, start_time)
+        for t_str, h, val in zip(binned_labels, binned_hours, binned_values):
+            add_row(t_str, h, val, "Bin Average", bin_avg=val)
 
     # Outliers
     # We need to calculate relative time for outliers too

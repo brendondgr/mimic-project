@@ -104,9 +104,18 @@
                             <option value="cubic_hermite">Cubic Hermite (PCHIP)</option>
                         </select>
                     </div>
-                    <p class="method-description">
-                        Select a method to visualize interpolated trends between data points.
-                    </p>
+                    <div class="interpolation-controls" style="margin-top: 1rem;">
+                        <div class="input-group">
+                            <label for="bin-size" style="font-size: 0.875rem; color: var(--text-secondary);">Averaging
+                                Bins (0-10)</label>
+                            <input type="number" id="bin-size" min="0" max="10" value="0" class="subject-select"
+                                style="width: 100%;">
+                        </div>
+                        <div class="checkbox-group" style="padding-top: 0.5rem;">
+                            <input type="checkbox" id="hide-original">
+                            <label for="hide-original" style="font-size: 0.875rem;">Hide Original Points</label>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="chart-card" style="position: relative;">
@@ -151,6 +160,7 @@
                             <th>Time</th>
                             <th>Hours (h)</th>
                             <th>BPM</th>
+                            <th>Bin Average</th>
                             <th>Type</th>
                         </tr>
                     </thead>
@@ -274,12 +284,12 @@
                 }
             });
 
-            // Interpolation Handler
-            interpolationSelect.addEventListener('change', async (e) => {
-                const method = e.target.value;
+            // Unified Interpolation Handler
+            async function updateInterpolation() {
+                const method = interpolationSelect.value;
                 if (!rawBpmData) return;
 
-                // Disable select momentarily
+                // Disable inputs momentarily
                 interpolationSelect.disabled = true;
 
                 try {
@@ -287,9 +297,11 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            subject_id: rawBpmData.subject_id, // useful for title
+                            subject_id: rawBpmData.subject_id,
                             raw_data: rawBpmData,
-                            interpolation_method: method
+                            interpolation_method: method,
+                            bin_size: parseInt(document.getElementById('bin-size').value, 10),
+                            hide_original_points: document.getElementById('hide-original').checked
                         })
                     });
 
@@ -308,7 +320,12 @@
                 } finally {
                     interpolationSelect.disabled = false;
                 }
-            });
+            }
+
+            // Attach listeners to all interpolation controls
+            interpolationSelect.addEventListener('change', updateInterpolation);
+            document.getElementById('bin-size').addEventListener('change', updateInterpolation);
+            document.getElementById('hide-original').addEventListener('change', updateInterpolation);
 
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
@@ -336,7 +353,8 @@
                         body: JSON.stringify({
                             subject_id: subjectId,
                             random: isRandom,
-                            interpolation_method: 'none'
+                            interpolation_method: 'none',
+                            bin_size: 0
                         })
                     });
 
@@ -427,12 +445,16 @@
                     const tr = document.createElement('tr');
 
                     const isOriginal = row.type.toLowerCase().includes('original');
-                    const typeClass = isOriginal ? 'type-original' : 'type-interpolated';
+                    const isBinAvg = row.type.toLowerCase().includes('bin average');
+                    let typeClass = 'type-interpolated';
+                    if (isOriginal) typeClass = 'type-original';
+                    if (isBinAvg) typeClass = 'type-bin-average';
 
                     tr.innerHTML = `
                         <td>${row.time}</td>
                         <td>${row.hours.toFixed(2)}</td>
                         <td>${row.bpm.toFixed(1)}</td>
+                        <td>${row.bin_avg !== undefined && row.bin_avg !== null ? row.bin_avg.toFixed(1) : '-'}</td>
                         <td><span class="type-badge ${typeClass}">${row.type}</span></td>
                     `;
                     fragment.appendChild(tr);
