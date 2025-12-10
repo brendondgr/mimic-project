@@ -2,6 +2,7 @@ physionet.org/
 *log
 *log.1
 *log.2
+*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
