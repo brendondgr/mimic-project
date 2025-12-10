@@ -526,13 +526,15 @@ def create_line_plot(raw_values, raw_timestamps, subject_id, interpolated_values
     line_layout['yaxis'] = common_layout['yaxis'].copy()
     line_layout['yaxis']['title'] = "BPM"
     line_layout['legend'] = dict(
-        orientation="h",
-        yanchor="bottom",
-        y=1.02,
+        orientation="v",
+        yanchor="top",
+        y=0.98,
         xanchor="right",
-        x=1,
-        bgcolor="rgba(0,0,0,0)",
-        font=dict(size=10)
+        x=0.98,
+        bgcolor="rgba(17, 24, 39, 0.7)", # Semi-transparent dark bg
+        bordercolor="#374151",
+        borderwidth=1,
+        font=dict(size=11)
     )
     
     line_fig.update_layout(**line_layout)

@@ -219,6 +219,9 @@
                     layoutClone.paper_bgcolor = '#FFFFFF';
                     layoutClone.plot_bgcolor = '#FFFFFF';
                     layoutClone.font = { family: "Inter, sans-serif", color: '#111827' }; // Dark gray text
+                    // Ensure legend background is white for saved image
+                    if (!layoutClone.legend) layoutClone.legend = {};
+                    layoutClone.legend.bgcolor = '#FFFFFF';
 
                     const gridColor = '#E5E7EB'; // Light gray grid
                     const spineColor = '#374151'; // Darker gray axis lines
@@ -242,7 +245,7 @@
                     await Plotly.newPlot(tempDiv, dataClone, layoutClone);
 
                     // Capture image from Temp Plot
-                    const dataUrl = await Plotly.toImage(tempDiv, { format: 'png', width: 1200, height: 800 });
+                    const dataUrl = await Plotly.toImage(tempDiv, { format: 'png', width: 1200, height: 800, scale: 3 });
 
                     const method = interpolationSelect.value;
                     const subjectId = rawBpmData.subject_id;
