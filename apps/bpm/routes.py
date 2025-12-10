@@ -244,6 +244,8 @@ def load_data():
             clean_df = bpm_df.copy()
 
         # Averaging Duplicates on Clean Data
+        # IMPORTANT: This averaging happens BEFORE any binning is applied.
+        # Duplicates (same timestamp) are averaged first, then binning is applied to the averaged data.
         valuenum = []
         charttime = []
         point_types = []
@@ -254,7 +256,7 @@ def load_data():
             grouped = grouped.sort_values('charttime')
             
             valuenum = grouped['mean'].tolist()
-            # If count > 1, it was averaged
+            # If count > 1, it was averaged - mark as "Averaged" in Type column
             point_types = ['Averaged' if c > 1 else 'Original' for c in grouped['count']]
             charttime = grouped['charttime'].dt.strftime('%Y-%m-%d %H:%M:%S').tolist()
 
